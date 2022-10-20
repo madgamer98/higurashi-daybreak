@@ -92,8 +92,13 @@ sub show_file_table {
     }
 
     print "\nLIST:\n";
-    foreach (@$list) {
-	print "  ", join (", ", %$_), "\n";
+    foreach my $h (@$list) {
+        my @pname = ();
+        foreach my $sh (sort keys %$h) {
+            push @pname, $sh;
+            push @pname, $h->{$sh};
+        }
+        print "  ", join (", ", @pname), "\n";
     }
 }
 
@@ -111,7 +116,12 @@ sub list_bundle {
     my ($str, $str2, $k);
 
     foreach my $h (@$list) {
-	print "  ", join (", ", %$h), "\n";
+        my @pname = ();
+        foreach my $sh (sort keys %$h) {
+            push @pname, $sh;
+            push @pname, $h->{$sh};
+        }
+        print "  ", join (", ", @pname), "\n";
     }
 }
 
@@ -137,7 +147,12 @@ sub extract_bundle {
 	#next;
 
 	next if ($h->{name} !~ /$pattern/);
-	print "  ", join (", ", %$h), "\n";
+    my @pname = ();
+    foreach my $sh (sort keys %$h) {
+        push @pname, $sh;
+        push @pname, $h->{$sh};
+    }
+    print "  ", join (", ", @pname), "\n";
 	seek ($IFH, $h->{offset}, SEEK_SET);
 	read ($IFH, $str, $h->{length}) == $h->{length} or die "Error extracting from bundle";
 	my $key = get_file_key ($h->{offset});
