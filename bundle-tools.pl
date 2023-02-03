@@ -5,11 +5,16 @@ use Fcntl ('SEEK_SET', 'SEEK_CUR', 'SEEK_END');
 use Encode qw/encode decode/;
 
 #Script created by Roger Pepitone.
+#2023: Edited by Chase Dalton Pollard / madgamer98
 
 #Some usage notes from HigurashiArchive: 
 #* The script needs to be run in binary mode, so it won't work on a Windows machine out of the box. There is a way to get it to work on Windows but it's easier and faster to throw it on a Linux machine instead because Linux opens files in binmode by default.
 #* I have not really tested the functionality of the --update or --list options. In theory you could use --update to create mods, but the game is impossible to run on modern computers anyway.
 #* --extract requires either two or three args (input .dat file, output destination location, and optionally a pattern). The two-arg version doesn't seem to work as intended, because it will fail to deobfuscate certain files, in particular .x models of some of the characters. Using the regex pattern [.]* for the pattern seems to make the missing items decrypt as intended, but I have no way of knowing this 100% for sure. There may actually be something missing. I checked the size of the DAT file with the output directory and they were within a few hundred kb of each other, so I felt fairly confident about its output.
+
+#More usage notes from madgamer98
+#Script works fine on my windows machine out of the box. I've made the changes needed to have it run in binary mode (binmode) anyway just in case.
+#Game seems to run fine on Windows 10/11 as long as you set your CPU core affinity to 1 core.
 
 # This subroutine decrypts a block of data in the file table
 sub decrypt_file_table_block {
@@ -100,6 +105,7 @@ sub show_file_table {
     # open the file for reading and assign it to the file handle $FH
     my $FH;
     open ($FH, '<', $fname) or die "Unable to open file: $!";
+    binmode $FH;
 
     # call get_table_data on the file handle and extract the resulting hash and list
     my ($hash, $list) = get_table_data ($FH);
@@ -149,6 +155,7 @@ sub list_bundle {
     # Open the input file handle for the bundle file
     my $IFH;
     open $IFH, "<", $bundle_path or die "Unable to open $bundle_path";
+    binmode $IFH;
 
     # Get the table data of the bundle file
     my ($hash, $list) = get_table_data ($IFH);
@@ -187,6 +194,7 @@ sub extract_bundle {
     # open the input file handle
     my $IFH;
     open $IFH, "<", $bundle_path or die "Unable to open $bundle_path";
+    binmode $IFH;
 
     # get the hash and list data from the input file handle
     my ($hash, $list) = get_table_data ($IFH);
@@ -246,6 +254,7 @@ sub extract_bundle {
         # open the output file handle
         my $OFH;
         open $OFH, ">", $out_name or die "Unable to open $out_name";
+        binmode $OFH;
 
         # write the decrypted contents of the file to the output file handle
         print $OFH $str2;
@@ -393,6 +402,7 @@ sub read_file_in {
 
     my $IFH;
     open $IFH, "<", $fn;
+    binmode $IFH;
     local $/;
     my $in_dat = <$IFH>;
 
@@ -524,6 +534,7 @@ sub patch_bundle {
     #open ($IFH, "<", $orig_bundle) or die "Unable to open $orig_bundle for patching";
     my $mtime = -M $new_bundle;
     open ($OFH, "+<", $new_bundle) or die "Unable to open $new_bundle for writing: $!";
+    binmode $OFH;
 
     my ($h_table, $l_table) = get_table_data ($OFH);
 
