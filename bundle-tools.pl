@@ -11,86 +11,108 @@ use Encode qw/encode decode/;
 #* I have not really tested the functionality of the --update or --list options. In theory you could use --update to create mods, but the game is impossible to run on modern computers anyway.
 #* --extract requires either two or three args (input .dat file, output destination location, and optionally a pattern). The two-arg version doesn't seem to work as intended, because it will fail to deobfuscate certain files, in particular .x models of some of the characters. Using the regex pattern [.]* for the pattern seems to make the missing items decrypt as intended, but I have no way of knowing this 100% for sure. There may actually be something missing. I checked the size of the DAT file with the output directory and they were within a few hundred kb of each other, so I felt fairly confident about its output.
 
+# This subroutine decrypts a block of data in the file table
 sub decrypt_file_table_block {
+    # Parameters are the index of the block and the encrypted string
     my ($index, $str) = @_;
     
+    # Masks the index to 16 bytes (0x1ff = 511 in decimal)
     $index = $index & 0x1ff;
 
-    #my ($in_index, $str) = @_;
-    #
-    #$index = $index & 0x1ff;
-    #my $index = $in_index & 0x1ff;
+    # Initialize the counter (ctr) and key for the decryption process
+    # The counter is calculated as (100 + index * 77) & 0xff (masked to 8 bytes)
+    # The key is calculated as (100 * (index + 1) + (255 & (index * (index - 1) / 2)) * 77) & 0xff (masked to 8 bytes)
     my $ctr = (100 + $index*77) & 0xff;
     my $key = (100*($index+1) + (0xff&($index*($index-1)/2))*77) & 0xff;
-    #my $ctr = 100; my $key = 100;
 
+    # Initialize an empty string to store the decrypted data
     my $rv = '';
+    
+    # Loop through each character in the encrypted string
     for (my $i = 0; $i < length ($str); ++ $i) {
-	#if (($in_index + $i) % 268 == 0) { print "index = ", ($in_index + $i), ", ctr = $ctr, key = $key\n"; }
-	$rv .= chr (ord (substr ($str, $i, 1)) ^ $key);
-	$key = ($key + $ctr) & 0xff;
-	$ctr = ($ctr + 77) & 0xff;
+        # XOR the character with the key and add it to the decrypted data string
+        $rv .= chr (ord (substr ($str, $i, 1)) ^ $key);
+        # Update the key and counter for the next iteration
+        $key = ($key + $ctr) & 0xff;
+        $ctr = ($ctr + 77) & 0xff;
     }
-    #print "\n";
-    #print "$index $rv\n";
+    # Return the decrypted data
     return $rv;
 }
 
+# This subroutine grabs a array/hash table of the files data.
 sub get_table_data {
+    # Define the input file handle ($IFH) as the argument passed to the function
     my ($IFH) = @_;
 
+    # Seek to the start of the file or die with an error message if there is a problem
     seek ($IFH, 0, SEEK_SET) or die "Error seeking to start of file: $!";
 
+    # Declare a scalar variable $data to store the data read from the file
     my $data;
+    # Read two bytes from the input file into the $data variable. Die with an error message if there is a problem
     read ($IFH, $data, 2) == 2 or die "Error reading table length: $!";
+    # Unpack the two bytes read into the $data variable into a binary number and store it in the $n_files variable
     my $n_files = unpack ('v', $data);
 
+    # Read the next 268 * $n_files bytes from the input file into the $data variable. Die with an error message if there is a problem
     read ($IFH, $data, 268 * $n_files) == 268*$n_files or die "Error reading in table: $!";
 
-    #my ($data2, $key, $ctr) = ('', 100, 100);
-    #
-    #for (my $i = 0; $i < 268 * $n_files; ++ $i) {
-    #	$data2 .= chr (ord (substr ($data, $i, 1)) ^ $key);
-    #	$key = ($key + $ctr) & 0xff;
-    #	$ctr = ($ctr + 77) & 0xff;
-    #}
-    #my $data2 = '';
-    #for (my $i = 0; $i < $n_files; ++ $i) {
-    #	$data2 .= decrypt_file_table_block (268 * $i, substr ($data, 268*$i, 268));
-    #}
+    # Call the function `decrypt_file_table_block` with the starting position (0) and the $data variable as arguments, and store the result in $data2
     my $data2 = decrypt_file_table_block (0, $data);
 
+    # Declare an array variable @table to store the file table data
     my @table = ();
+    # Declare a hash variable %table to store the file table data
     my %table = ();
 
+    # Loop through each of the $n_files in the file table
     for (my $i = 0; $i < $n_files; ++ $i) {
-	my ($fname, $len, $offset) = unpack ('a260VV', substr ($data2, $i*268, 268));
-	#$fname =~ s/\0.*//;
-	my $j = 0;
-	while ($j < length ($fname) && substr ($fname, $j, 1) ne "\0") {++$j;}
+        # Unpack the next 268 bytes of the $data2 variable into variables $fname, $len, and $offset
+        my ($fname, $len, $offset) = unpack ('a260VV', substr ($data2, $i*268, 268));
 
-	$fname = decode ("shift_jis", substr ($fname, 0, $j));
-	my $tmp = { index => $i, offset => $offset, length => $len, name => $fname };
-	#push @table, [ $fname, $offset, $len ];
-	#$table{$fname} = { index => $i, offset => $offset, length => $len };
-	push @table, $tmp;
-	$table{$fname} = $tmp;
+        # Set the variable $j to 0
+        my $j = 0;
+        # Loop while $j is less than the length of the $fname string and the character at position $j in $fname is not a null character
+        while ($j < length ($fname) && substr ($fname, $j, 1) ne "\0") {++$j;}
+    
+        # Set $fname to a decoded version of the first $j characters of the $fname string, using the "shift_jis" encoding
+        $fname = decode ("shift_jis", substr ($fname, 0, $j));
+        # Create a hash reference $tmp with keys "index", "offset", "length", and "name", and values $i, $offset, $len, and $fname, respectively
+        my $tmp = { index => $i, offset => $offset, length => $len, name => $fname };
+        # Push the $tmp reference onto the end of the @table array
+        push @table, $tmp;
+        # Set the value of the key $fname in the %table hash to the $tmp reference
+        $table{$fname} = $tmp;
     }
     return (\%table, \@table);
 }
 
+# show_file_table - prints out the contents of a file table
+
 sub show_file_table {
+    # set the output encoding for standard output to UTF-8
     binmode STDOUT, ":utf8";
+
+    # extract the file name from the input arguments
     my ($fname) = @_;
+
+    # open the file for reading and assign it to the file handle $FH
     my $FH;
     open ($FH, '<', $fname) or die "Unable to open file: $!";
+
+    # call get_table_data on the file handle and extract the resulting hash and list
     my ($hash, $list) = get_table_data ($FH);
 
+    # print the contents of the hash
     print "HASH:\n";
     foreach (sort keys %$hash) {
+        # print each key and its values
         print " $_ -> ";
         foreach my $nested_key (sort keys %{$hash->{$_}}) {
+            # extract the value of the nested key
             my $printedHasHValue = %{$hash->{$_}}{$nested_key};
+            # print the nested key and value, but skip the key "index"
             if ($nested_key ne "index") {
                 print $nested_key . " : " . $printedHasHValue . " ";
             }
@@ -98,156 +120,226 @@ sub show_file_table {
         print "\n";
     }
 
+    # print the contents of the list
     print "\nLIST:\n";
     foreach my $h (@$list) {
+        # create an array of key-value pairs
         my @pname = ();
         foreach my $sh (sort keys %$h) {
+            # push each key and value onto the array
             push @pname, $sh;
             push @pname, $h->{$sh};
         }
+        # print the array as a string, with each pair separated by a comma
         print "  ", join (", ", @pname), "\n";
     }
 }
 
+# This subroutine lists the files in a given bundle file.
 sub list_bundle {
+    # Accepts the path to the bundle file and the extract path as input
     my ($bundle_path, $extract_path) = @_;
 
+    # If the bundle path does not exist, print an error message and exit
     die "$bundle_path does not exist" if (! -f $bundle_path);
 
+    # Set the standard output stream to UTF-8 encoding
     binmode STDOUT, ":utf8";
 
+    # Open the input file handle for the bundle file
     my $IFH;
     open $IFH, "<", $bundle_path or die "Unable to open $bundle_path";
 
+    # Get the table data of the bundle file
     my ($hash, $list) = get_table_data ($IFH);
     my ($str, $str2, $k);
 
+    # Iterate through the list of files in the bundle file
     foreach my $h (@$list) {
+        # Create an array to store the names of each file in the bundle file
+        my @pname = ();
+        foreach my $sh (sort keys %$h) {
+            # Push the file names and their details into the array
+            push @pname, $sh;
+            push @pname, $h->{$sh};
+        }
+        # Print the names and details of the files in the bundle file
+        print "  ", join (", ", @pname), "\n";
+    }
+}
+
+# extract_bundle - extract files from a bundle to the specified extract path.
+#
+# @bundle_path: path to the bundle file
+# @extract_path: path to extract the files to
+# @pattern: optional pattern to filter files to extract
+
+sub extract_bundle {
+    # get the arguments
+    my ($bundle_path, $extract_path, $pattern) = @_;
+
+    # check if the bundle file exists and die if not
+    die "$bundle_path does not exist" if (! -f $bundle_path);
+
+    # set the binary mode of the standard output to utf8
+    binmode STDOUT, ":utf8";
+
+    # open the input file handle
+    my $IFH;
+    open $IFH, "<", $bundle_path or die "Unable to open $bundle_path";
+
+    # get the hash and list data from the input file handle
+    my ($hash, $list) = get_table_data ($IFH);
+    my ($str, $str2, $k);
+
+    # loop through the list
+    foreach my $h (@$list) {
+        # skip if the name does not match the pattern
+        next if ($h->{name} !~ /$pattern/);
+        # print the file information for debugging purposes
         my @pname = ();
         foreach my $sh (sort keys %$h) {
             push @pname, $sh;
             push @pname, $h->{$sh};
         }
         print "  ", join (", ", @pname), "\n";
-    }
-}
 
-sub extract_bundle {
-    my ($bundle_path, $extract_path, $pattern) = @_;
+        # seek to the offset of the file in the input file handle
+        seek ($IFH, $h->{offset}, SEEK_SET);
+        # read the contents of the file from the input file handle
+        read ($IFH, $str, $h->{length}) == $h->{length} or die "Error extracting from bundle";
+        # get the file key
+        my $key = get_file_key ($h->{offset});
+        # decrypt the contents of the file
+        for (my $i = 0; $i < $h->{length}; ++ $i) {
+            $str2 .= chr (ord (substr ($str, $i, 1)) ^ $key);
+        }
+        # reset the contents of the file
+        $str = '';
 
-    die "$bundle_path does not exist" if (! -f $bundle_path);
+        # get the output name of the file
+        my $out_name = $extract_path . '/' . $h->{name};
 
-    binmode STDOUT, ":utf8";
+        # check the extension of the file
+        if ($out_name =~ /\.cnv$/) {
+            # get the key of the data
+            $key = ord (substr ($str2, 0, 1));
+            # convert the file based on the key of the data
+            if ($key == 1) {
+                convert_wav (\$str2);
+                $out_name =~ s/cnv$/wav/;
+            } elsif ($key == 24 || $key == 32) {
+                convert_image (\$str2);
+                $out_name =~ s/cnv$/tga/;
+            } else {
+                print "Bad data key ($key) in $out_name\n";
+            }
+        }
+        # create any necessary subdirectories in the path of the output file
+        for (my $i = 0; $i < length ($out_name); ++ $i) {
+            if (substr ($out_name, $i, 1) eq '/' &&
+            ! -d substr ($out_name, 0, $i)) {
+                mkdir (substr ($out_name, 0, $i));
+            }
+        }
 
-    my $IFH;
-    open $IFH, "<", $bundle_path or die "Unable to open $bundle_path";
+        # open the output file handle
+        my $OFH;
+        open $OFH, ">", $out_name or die "Unable to open $out_name";
 
-    my ($hash, $list) = get_table_data ($IFH);
-    my ($str, $str2, $k);
+        # write the decrypted contents of the file to the output file handle
+        print $OFH $str2;
 
-    foreach my $h (@$list) {
-	#if ($h->{name} =~ /$pattern/) {
-	#    print "$h->{name} MATCHES  $pattern\n";
-	#} else {
-	#    #print "$h->{name} no match $pattern\n";
-	#}
-	#next;
-
-	next if ($h->{name} !~ /$pattern/);
-    my @pname = ();
-    foreach my $sh (sort keys %$h) {
-        push @pname, $sh;
-        push @pname, $h->{$sh};
-    }
-    print "  ", join (", ", @pname), "\n";
-	seek ($IFH, $h->{offset}, SEEK_SET);
-	read ($IFH, $str, $h->{length}) == $h->{length} or die "Error extracting from bundle";
-	my $key = get_file_key ($h->{offset});
-	for (my $i = 0; $i < $h->{length}; ++ $i) {
-	    $str2 .= chr (ord (substr ($str, $i, 1)) ^ $key);
-	}
-	$str = '';
-
-	my $out_name = $extract_path . '/' . $h->{name};
-
-	if ($out_name =~ /\.cnv$/) {
-	    $key = ord (substr ($str2, 0, 1));
-
-	    if ($key == 1) {
-		convert_wav (\$str2);
-		$out_name =~ s/cnv$/wav/;
-	    } elsif ($key == 24 || $key == 32) {
-		convert_image (\$str2);
-		$out_name =~ s/cnv$/tga/;
-	    } else {
-		print "Bad data key ($key) in $out_name\n";
-	    }
-	}
-	for (my $i = 0; $i < length ($out_name); ++ $i) {
-	    if (substr ($out_name, $i, 1) eq '/' &&
-		! -d substr ($out_name, 0, $i)) {
-		mkdir (substr ($out_name, 0, $i));
-	    }
-	}
-	my $OFH;
-	open $OFH, ">", $out_name or die "Unable to open $out_name";
-	print $OFH $str2;
-	$str2 = '';
+        # reset the contents of the decrypted file
+        $str2 = '';
     }
 }
 
 sub convert_image { #cnv2tga
     my ($rstr) = @_;
     
+    # Unpack values from the input image file format
     my ($bpp, $width, $height, $width2, $zero) = unpack ("CVVVV", substr ($$rstr, 0, 17));
     
-    #if ($width != $width2) { die "Two width values disagree: $width $width2"; }
+    # Check if the two width values in the input file format match
+    # If not, print a warning message
     if ($width != $width2) { print " *** Warning ----: Two width values disagree: $width $width2\n"; }
     
+    # Check if the input image file has a supported bit depth
+    # If not, raise an error
     if ($bpp != 24 && $bpp != 32) { die "BPP must be 24 or 32, not $bpp"; }
     
+    # Check if the input image data has the correct length
+    # If not, raise an error
     if ($width2 * $height * 4 + 17 != length ($$rstr)) { die "Data lengths disagree: ". ($width2 * $height * 4 + 17)." vs ".length ($$rstr); }
     
+    # Check if the value of "zero" in the input image format is 0
+    # If not, raise an error
     if ($zero != 0) { die "Nonzero value in final header block"; }
 
+    # Prepare the output data
     my $outdat = '';
     $outdat .= pack ('ccc'.'vvc'.'vvvvcc', 0,0,2,    0,0,0, 
                      0,0,$width,$height, 32, 0x08);
+    
+    # Copy image data from the input image to the output data, flipping the rows
     for (my $r = $height - 1; $r >= 0; $r --) {
         for (my $c = 0; $c < $width2; ++ $c) {
             $outdat .= substr ($$rstr, 17 + 4 * ($r * $width2 + $c), 4);
         }
     }
     
+    # Replace the input scalar with the output data
     $$rstr = $outdat;
 }
 
-sub convert_wav { #cnv2wav
+sub convert_wav {#cnv2wav
     my ($rstr) = @_;
 
+    # unpack values from the passed string
     my ($audio_fmt, $n_channels, $sample_rate, $byte_rate, 
         $block_align, $bits_per_sample, $extra_param_size, $subchunk_2_size) 
         = unpack ("vvVV"."vvvV", substr ($$rstr, 0, 22));
 
+    # Check if the size of the passed string is equal to the subchunk size + 22
     if ($subchunk_2_size != length($$rstr) - 22) {
+        # Print a warning message in case of mismatch
         print " *** Warning ----: Size mismatch: $subchunk_2_size vs. ", length($$rstr)-22, ".\n";
         #die "Size mismatch: $subchunk_2_size vs. ", length($$rstr)-22, ".";
     }
 
+    # Check if the byte rate is equal to the product of sample rate, number of channels and bits per sample divided by 8
     if ($byte_rate != ($sample_rate * $n_channels * ($bits_per_sample/8))) {
         die "Byte rate mismatch: $byte_rate vs. ".
             ($sample_rate * $n_channels * ($bits_per_sample/8));
     }
+    # Check if the block align is equal to the product of number of channels and bits per sample divided by 8
     if ($block_align != $n_channels * ($bits_per_sample/8)) {
         die "Block align mismatch: $block_align vs. ".
             $n_channels * ($bits_per_sample/8);
     }
 
+    # Create a new packed wav file using the unpacked values
+    # In this particular example, the format string is 'a4V'.'a4a4VvvVVvv'.'a4Va*'. It specifies the following structure:
+    # A four-byte string ('RIFF')
+    # A 4-byte unsigned integer ($subchunk_2_size + 36)
+    # A four-byte string ('WAVE')
+    # A four-byte string ('fmt ')
+    # A 4-byte unsigned integer (16)
+    # A 2-byte unsigned integer ($audio_fmt)
+    # A 2-byte unsigned integer ($n_channels)
+    # A 4-byte unsigned integer ($sample_rate)
+    # A 4-byte unsigned integer ($byte_rate)
+    # A 2-byte unsigned integer ($block_align)
+    # A 2-byte unsigned integer ($bits_per_sample)
+    # A four-byte string ('data')
+    # A 4-byte unsigned integer ($subchunk_2_size)
+    # A sequence of bytes, specified by substr ($$rstr, 22)
     $$rstr = pack ('a4V'.'a4a4VvvVVvv'.'a4Va*', 
-		   ('RIFF', $subchunk_2_size + 36), 
-		   ('WAVE', 'fmt ', 16, $audio_fmt, $n_channels, $sample_rate,
-		    $byte_rate, $block_align, $bits_per_sample), 
-		   ('data', $subchunk_2_size, substr ($$rstr, 22)));
+        ('RIFF', $subchunk_2_size + 36), 
+        ('WAVE', 'fmt ', 16, $audio_fmt, $n_channels, $sample_rate,
+            $byte_rate, $block_align, $bits_per_sample), 
+        ('data', $subchunk_2_size, substr ($$rstr, 22)));
 }
 
 sub rpatch_dir {
@@ -288,7 +380,11 @@ sub rpatch_dir {
 }
 
 sub get_file_key {
+    # shift operator removes and returns the first element of the list
     my $offset = shift;
+    # bitwise right shift to divide the offset by 2
+    # bitwise and operation to mask the result with 0xff (255)
+    # bitwise or operation to set the 8th bit to 1
     return (($offset >> 1) & 0xff) | 0x08;
 }
 	
