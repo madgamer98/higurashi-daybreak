@@ -87,8 +87,15 @@ sub show_file_table {
     my ($hash, $list) = get_table_data ($FH);
 
     print "HASH:\n";
-    foreach (keys %$hash) {
-	print "  $_ -> ", join (", ", %{$hash->{$_}}), "\n";
+    foreach (sort keys %$hash) {
+        print " $_ -> ";
+        foreach my $nested_key (sort keys %{$hash->{$_}}) {
+            my $printedHasHValue = %{$hash->{$_}}{$nested_key};
+            if ($nested_key ne "index") {
+                print $nested_key . " : " . $printedHasHValue . " ";
+            }
+        }
+        print "\n";
     }
 
     print "\nLIST:\n";
